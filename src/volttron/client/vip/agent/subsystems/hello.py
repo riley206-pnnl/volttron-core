@@ -21,20 +21,17 @@
 #
 # ===----------------------------------------------------------------------===
 # }}}
-
 import logging
 import weakref
 
-from .base import SubsystemBase
-from ..results import ResultsDictionary
-from zmq import ZMQError
-from zmq.green import ENOTSOCK
+from volttron.client.vip.agent.subsystems.base import SubsystemBase
+from volttron.client.vip.agent import VIPError
+from volttron.client.vip.agent.results import ResultsDictionary
+
 
 __all__ = ["Hello"]
 
-from volttron.client.logs import get_logger
-
-_log = get_logger()
+_log = logging.getLogger(__name__)
 
 
 class Hello(SubsystemBase):
@@ -74,9 +71,8 @@ class Hello(SubsystemBase):
         else:
             try:
                 connection.send_vip(peer, "hello", args=["hello"], msg_id=result.ident)
-            except ZMQError as exc:
-                if exc.errno == ENOTSOCK:
-                    _log.error("Socket send on non socket {}".format(self.core().identity))
+            except OSError as e:
+                raise VIPError(e.errno, e.strerror, peer, "hello")
 
         return result
 

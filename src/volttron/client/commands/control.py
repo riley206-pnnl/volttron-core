@@ -49,22 +49,26 @@ from volttron.client.commands.auth_parser import add_auth_parser
 from volttron.client.commands.authz_parser import add_authz_parser
 from volttron.client.commands.config_store_parser import add_config_store_parser
 from volttron.client.commands.install_parser import add_install_agent_parser, add_install_lib_parser
+from volttron.client.commands.publish_parser import add_publish_parser
+from volttron.client.commands.subscribe_parser import add_subscribe_parser
 from volttron.client.known_identities import (AUTH, CONFIGURATION_STORE, PLATFORM_HEALTH)
 from volttron.client.vip.agent.errors import Unreachable, VIPError
 from volttron.client.vip.agent.subsystems.query import Query
 from volttron.utils import ClientContext as cc
 from volttron.utils import argparser as config
-from volttron.utils import get_address, jsonapi
+from volttron.utils import jsonapi
 from volttron.utils.commands import (is_volttron_running, wait_for_volttron_shutdown)
 from volttron.utils.jsonrpc import MethodNotFound, RemoteError
+from volttron.utils import is_volttron_running
 
 _stdout = sys.stdout
 _stderr = sys.stderr
 
 # will be volttron.platform.main or main.py instead of __main__
-from volttron.client.logs import get_logger, get_default_client_log_config
+from volttron.client.logs import get_default_client_log_config
 
-_log = get_logger()
+_log = logging.getLogger(__name__)
+
 # Allows server side logging.
 #_log.setLevel(logging.DEBUG)
 
@@ -459,7 +463,7 @@ def list_remotes(opts):
 
     """
     conn = opts.connection
-    if not conn:
+    if not is_volttron_running(cc.get_volttron_home()):
         _stderr.write("VOLTTRON is not running. This command "
                       "requires VOLTTRON platform to be running\n")
         return
@@ -554,7 +558,7 @@ def approve_remote(opts):
     :type opts.user_id: str
     """
     conn = opts.connection
-    if not conn:
+    if not is_volttron_running(cc.get_volttron_home()):
         _stderr.write("VOLTTRON is not running. This command "
                       "requires VOLTTRON platform to be running\n")
         return
@@ -568,7 +572,7 @@ def deny_remote(opts):
     :type opts.user_id: str
     """
     conn = opts.connection
-    if not conn:
+    if not is_volttron_running(cc.get_volttron_home()):
         _stderr.write("VOLTTRON is not running. This command "
                       "requires VOLTTRON platform to be running\n")
         return
@@ -582,7 +586,7 @@ def delete_remote(opts):
     :type opts.user_id: str
     """
     conn = opts.connection
-    if not conn:
+    if not is_volttron_running(cc.get_volttron_home()):
         _stderr.write("VOLTTRON is not running. This command "
                       "requires VOLTTRON platform to be running\n")
         return
@@ -2134,47 +2138,52 @@ def main():
     os.environ["VOLTTRON_HOME"] = volttron_home
 
     global_args = config.ArgumentParser(description="global options", add_help=False)
-    global_args.add_argument(
-        "--debug",
-        action="store_true",
-        help="show tracebacks for errors rather than a brief message",
-    )
-    global_args.add_argument(
-        "-t",
-        "--timeout",
-        type=float,
-        metavar="SECS",
-        help="timeout in seconds for remote calls (default: %(default)g)",
-    )
-    global_args.add_argument(
+    
+    # Connection options
+    connection_group = global_args.add_argument_group('Connection Options')
+    connection_group.add_argument(
         "--address",
         metavar="ADDR",
         help="URL to bind for VIP connections",
     )
-
-    global_args.set_defaults(
-        address=get_address(),
-        timeout=60,
+    connection_group.add_argument(
+        "-t",
+        "--timeout",
+        type=float,
+        metavar="SECS",
+        timeout=120.0,
+        help="timeout in seconds for remote calls (default: %(default)g)",
+    )
+    
+    # Debug options
+    debug_group = global_args.add_argument_group('Debug Options')
+    debug_group.add_argument(
+        "--debug",
+        action="store_true",
+        help="show tracebacks for errors rather than a brief message",
     )
 
     filterable = config.ArgumentParser(add_help=False)
-    filterable.add_argument(
+    
+    # Filter/Search options
+    filter_group = filterable.add_argument_group('Filter Options')
+    filter_group.add_argument(
         "--name",
         dest="by_name",
         action="store_true",
         help="filter/search by agent name. value passed should be quoted if it contains a regular expression",
     )
-    filterable.add_argument(
+    filter_group.add_argument(
         "--tag",
         dest="by_tag",
         action="store_true",
         help="filter/search by tag name. value passed should be quoted if it contains a regular expression",
     )
-    filterable.add_argument("--all-tagged",
+    filter_group.add_argument("--all-tagged",
                             dest="by_all_tagged",
                             action="store_true",
                             help="filter/search by all tagged agents")
-    filterable.add_argument(
+    filter_group.add_argument(
         "--uuid",
         dest="by_uuid",
         action="store_true",
@@ -2189,20 +2198,32 @@ def main():
         argument_default=argparse.SUPPRESS,
         parents=[global_args],
     )
-    parser.add_argument(
+    
+    # Output formatting options
+    output_group = parser.add_argument_group('Output Options')
+    output_group.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="format output to json",
+    )
+    
+    # Logging options
+    logging_group = parser.add_argument_group('Logging Options')
+    logging_group.add_argument(
         "-l",
         "--log",
         metavar="FILE",
         default=None,
         help="send log output to FILE instead of stderr",
     )
-    parser.add_argument(
+    logging_group.add_argument(
         "-L",
         "--log-config",
         metavar="FILE",
         help="read logging configuration from FILE",
     )
-    parser.add_argument(
+    logging_group.add_argument(
         "-q",
         "--quiet",
         action="add_const",
@@ -2210,7 +2231,7 @@ def main():
         dest="verboseness",
         help="decrease logger verboseness; may be used multiple times",
     )
-    parser.add_argument(
+    logging_group.add_argument(
         "-v",
         "--verbose",
         action="add_const",
@@ -2218,20 +2239,16 @@ def main():
         dest="verboseness",
         help="increase logger verboseness; may be used multiple times",
     )
-    parser.add_argument(
+    logging_group.add_argument(
         "--verboseness",
         type=int,
         metavar="LEVEL",
         default=logging.WARNING,
         help="set logger verboseness",
     )
+    
+    # Hidden options
     parser.add_argument("--show-config", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        default=False,
-        help="format output to json",
-    )
 
     parser.add_help_argument()
     parser.set_defaults(
@@ -2252,7 +2269,9 @@ def main():
         kwargs["parents"] = parents
         subparser = kwargs.pop("subparser", top_level_subparsers)
         return subparser.add_parser(*args, **kwargs)
-
+    
+    add_publish_parser(add_parser)
+    add_subscribe_parser(add_parser)
     add_install_agent_parser(add_parser)
     add_install_lib_parser(add_parser)
     add_rpc_agent_parser(add_parser)
@@ -2370,7 +2389,7 @@ def main():
     # Below vctl commands can work even when volttron is not up. For others
     # volttron need to be up.
     if len(args) > 0:
-        if args[0] not in ("list", "tag", "auth", "rabbitmq", "certs"):
+        if args[0] not in ("list", "tag"):
             # check pid file
             if not is_volttron_running(volttron_home):
                 _stderr.write("VOLTTRON is not running. This command "
@@ -2411,7 +2430,21 @@ def main():
 
     # logging.getLogger().setLevel(level=logging.DEBUG)
 
-    opts.connection: ControlConnection = ControlConnection(address=opts.address)
+    if opts.command == 'subscribe':
+        if opts.identity_stage:
+            try:
+                opts.func(opts)
+            except KeyboardInterrupt:
+                sys.stdout.write("Complete\n")
+                sys.exit(0)
+        else:
+            address = cc.get_address()
+            opts.connection: ControlConnection = ControlConnection(address=address)
+
+    else:
+        address = cc.get_address()
+        opts.connection: ControlConnection = ControlConnection(address=address)
+
     # opts.connection: ControlConnection = None
     # if is_volttron_running(volttron_home):
     #     opts.connection = ControlConnection(opts.vip_address)

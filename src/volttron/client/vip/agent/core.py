@@ -60,9 +60,7 @@ from .errors import VIPError
 
 __all__: list[str] = ["BasicCore", "Core", "killing"]
 
-from volttron.utils import get_logger
-
-_log = get_logger()
+_log = logging.getLogger(__name__)
 
 
 class Periodic(object):    # pylint: disable=invalid-name
@@ -493,7 +491,7 @@ class Core(BasicCore):
         # self.messagebus = messagebus
         self.subsystems = {"error": self.handle_error}
 
-        self._connection: Connection = connection_factory.build(credentials)
+        self._connection: Connection = connection_factory.build(credentials=credentials)
         self.identity = credentials.identity
 
         # _log.debug("address: %s", address)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import sys
 import typing
 from re import match
 from typing import Optional, TypeVar, Union, get_type_hints
@@ -74,6 +75,24 @@ class Container:
         Container.containers[name] = self
         self._resolvable: dict[T, S] = {}
         self._resolvable_lists: dict[T, Container.ResolvableList] = {}
+
+    def print_resolved(self, stream=sys.stdout):
+        stream.write(f'{"-" * 80}\n')
+        if self._resolvable_lists:
+            stream.write("Lists\n")
+            for r, v in self._resolvable_lists.items():
+                stream.write(f"\t{r} -> {v}\n")
+        else:
+            stream.write("No Resolvable Lists Found")
+
+        if self._resolvable:
+            stream.write("Singletons")
+            for r, v in self._resolvable.items():
+                stream.write(f"\t{r}-> {v}\n")
+            
+        else:
+            stream.write("No resolved items found")
+        stream.write(f'{"-" * 80}\n')
 
     @staticmethod
     def destroy_all():
@@ -175,6 +194,9 @@ class Container:
 
     def _resolve_arguments(self, fn: callable, **kwargs) -> Result[dict, None]:
         if inspect.isclass(fn):
+            # TODO: get_type_hints returns all params.
+            #  Add logic to skip optional args based on what is enabled
+            #  i.e. auth related class can be missing if auth is not enabled
             required_args = get_type_hints(fn.__init__)
         else:
             required_args = get_type_hints(fn)
@@ -300,7 +322,8 @@ class Container:
                 # the resovable services.
                 resolved_kwargs: Result[dict, None] = self._container._resolve_arguments(
                     self._value.__init__, **self._kwargs)
-
+                if isinstance(resolved_kwargs, Failure):
+                    raise ResolutionError(str(resolved_kwargs))
                 # required_args = get_type_hints(self._value.__init__)
 
                 # _log.debug(f"Required args are: {required_args}")

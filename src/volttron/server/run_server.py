@@ -23,6 +23,7 @@
 # }}}
 
 from gevent import monkey
+
 from volttron.types import MessageBusStopHandler
 
 monkey.patch_socket()
@@ -46,9 +47,7 @@ from volttron.server import server_argparser as config
 from volttron.server.containers import service_repo
 from volttron.server.logs import (LogLevelAction, configure_logging, log_to_file)
 from volttron.server.server_options import ServerOptions
-from volttron.server.tracking import Tracker
-from volttron.types.peer import ServicePeerNotifier
-from volttron.utils import ClientContext as cc, execute_command
+from volttron.utils import ClientContext as cc, execute_command, is_volttron_running
 from volttron.utils import (get_version, store_message_bus_config)
 from volttron.utils.persistance import load_create_store
 
@@ -71,6 +70,10 @@ def run_server():
     os.environ['VOLTTRON_SERVER'] = "1"
     volttron_home = Path(os.environ.get("VOLTTRON_HOME", "~/.volttron")).expanduser()
     os.environ["VOLTTRON_HOME"] = volttron_home.as_posix()
+
+    if is_volttron_running(volttron_home=volttron_home.as_posix()):
+        sys.stderr.write(f"Another VOLTTRON instance is already running using this VOLTTRON home {volttron_home}\n")
+        sys.exit(1)
 
     # Raise events that the volttron_home has been set.
     volttron_home_set_evnt.send(run_server)
@@ -200,6 +203,16 @@ def start_volttron_process(options: ServerOptions):
     # Change working dir
     os.chdir(opts.volttron_home)
 
+    if opts.enable_federation:
+        if not opts.address or len(opts.address) == 0:
+            _log.error("Cannot enable federation: no external address available.")
+            _log.error("Use --address to specify an external address for other platforms to connect to.")
+            _log.error("Federation will not be enabled.")
+            # Disable federation to prevent further attempts
+            opts.enable_federation = False
+            sys.exit(1)
+            
+
     # vip_address is meant to be a list so make it so.
     if not isinstance(opts.address, list):
         opts.address = [opts.address]
@@ -287,9 +300,23 @@ def start_volttron_process(options: ServerOptions):
                 )
         _log.debug("open file resource limit %d to %d", soft, hard)
 
-    # TODO: Dynamic loading needs to happen instead of this.
+    # import all essential volttron types
+    from volttron.loader import load_subclasses, find_subpackages
+
     if opts.auth_enabled:
-        import volttron.services.auth
+        # Shouldn't default VolttronAuthService impl of AuthService also be loaded dynamically?
+        # If so it should be moved to volttron.auth and not be in volttron.services.auth
+        #import volttron.services.auth
+        # Load the package
+        auth_pkg = importlib.import_module('volttron.types.auth')
+        # Access the __all__ attribute
+        base_auth_classes = getattr(auth_pkg, '__all__', None)
+        # load classes from volttron-lib-auth + any packages defined by additional libraries
+        for cls in base_auth_classes:
+            load_subclasses('volttron.types.auth.'+cls, "volttron.auth")
+
+    if opts.enable_federation:
+        from volttron.services.federation import FederationService
 
     aip_platform = service_repo.resolve(aip.AIPplatform)
     aip_platform.setup()
@@ -300,7 +327,6 @@ def start_volttron_process(options: ServerOptions):
     if mode & (stat.S_IWGRP | stat.S_IWOTH):
         _log.warning("insecure mode on directory: %s", opts.volttron_home)
 
-    tracker = Tracker()
     external_address_file = os.path.join(opts.volttron_home, "external_address.json")
     _log.debug("external_address_file file %s", external_address_file)
 
@@ -313,7 +339,6 @@ def start_volttron_process(options: ServerOptions):
                              "often the platform checks for any crashed agent "
                              "and attempts to restart. {}".format(e))
 
-    address = "inproc://vip"
     pid_file = os.path.join(opts.volttron_home.as_posix(), "VOLTTRON_PID")
     try:
         _log.debug("********************************************************************")
@@ -322,30 +347,26 @@ def start_volttron_process(options: ServerOptions):
         from volttron.server.decorators import start_service_agents
         from volttron.services.config_store.config_store_service import \
             ConfigStoreService
-        from volttron.types.auth import CredentialsStore
         from volttron.services.control.control_service import ControlService
         from volttron.services.health.health_service import HealthService
+
         from volttron.types.known_host import \
             KnownHostProperties as known_host_properties
         from volttron.utils import jsonapi
 
         spawned_greenlets = []
 
-        mb = None
-
         # TODO Replace with module level zmq that holds all of the zmq bits in order to start and
         #  run the message bus regardless of whether it's zmq or rmq.
 
+        from volttron.types import MessageBus
+        # A message bus is required, if we don't have one installed then this will definitely fail.
+        mb: MessageBus = service_repo.resolve(MessageBus) # type: ignore
         auth_service = None
+        # TODO move this to laoder code
         if options.auth_enabled:
             from volttron.types.auth import Authenticator
             from volttron.types.auth.auth_service import AuthService
-            import importlib
-
-            # Use volttron.services.auth to load the main auth service.  A user may choose
-            # to not use our default auth service and can install their own service to this
-            # location.
-            loader = importlib.util.find_spec("volttron.services.auth")
             authenticator = service_repo.resolve(Authenticator)
             auth_service = service_repo.resolve(AuthService)
 
@@ -365,11 +386,6 @@ def start_volttron_process(options: ServerOptions):
         del event
         spawned_greenlets.append(task)
 
-        from volttron.types import MessageBus
-
-        # A message bus is required, if we don't have one installed then this will definitely fail.
-        mb: MessageBus = service_repo.resolve(MessageBus)
-
         class StopHandler(MessageBusStopHandler):
 
             def message_bus_shutdown(self):
@@ -386,8 +402,17 @@ def start_volttron_process(options: ServerOptions):
         # mb = MessageBusClass(opts, notifier, tracker, protected_topics, external_address_file, config_store.core.stop)
 
         mb.start()
+        elapsed_time = 0
+        while elapsed_time < 30:
+            if mb.is_running():
+                break
+            gevent.sleep(1)
+            elapsed_time += 1
 
-        assert mb.is_running()
+        # if address is already bound to another instance mb start will fail.
+        if not mb.is_running():
+            sys.stderr.write("Messagebus did not start within the timeout period. Please check logs\n")
+            sys.exit(1)
 
         # The instance file is where we are going to record the instance and
         # its details according to
@@ -457,6 +482,11 @@ def start_volttron_process(options: ServerOptions):
 
         with open(pid_file, "w+") as f:
             f.write(str(os.getpid()))
+
+        if opts.enable_federation:
+            # Touch the file to cause a reload for the watcher.
+            fedfile = opts.volttron_home / "federation_config.json"
+            fedfile.touch()
 
         _log.debug("Finished Startup of Platform.")
 
@@ -645,7 +675,7 @@ def build_arg_parser(options: ServerOptions) -> argparse.ArgumentParser:
         metavar="MESSAGE_BUS_ADDR",
         action="append",
         default=[],
-        help="Address for binding to the message bus.",
+        help="Address for binding to the message bus. Required for Federation.",
     )
     agents.add_argument(
         "--local-address",
@@ -657,6 +687,23 @@ def build_arg_parser(options: ServerOptions) -> argparse.ArgumentParser:
         "--instance-name",
         default=options.instance_name,
         help="The name of the VOLTTRON instance this command is starting up.",
+    )
+    agents.add_argument(
+        "--enable-federation",
+        action="store_true",
+        inverse="--disable-federation",
+        help="Enable platform federation for connecting multiple VOLTTRON instances",
+    )
+    agents.add_argument(
+        "--disable-federation",
+        action="store_false",
+        dest="enable_federation",
+        help=argparse.SUPPRESS,
+    )
+    agents.add_argument(
+        "--federation-url",
+        default=None,
+        help="URL of federation registry service to connect to. Requires --address to be specified.",
     )
     # TODO: Determine if we need this
     # agents.add_argument(
@@ -699,7 +746,9 @@ def build_arg_parser(options: ServerOptions) -> argparse.ArgumentParser:
                         msgdebug=None,
                         setup_mode=False,
                         agent_isolation_mode=False,
-                        server_messagebus_id="vip.server")
+                        server_messagebus_id="vip.server",
+                        enable_federation=False,
+                        federation_url=None)
 
     return parser
 

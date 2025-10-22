@@ -18,9 +18,10 @@ Eclipse VOLTTRON (eclipse-volttron/volttron-core) is an open source platform for
 
 ## Installation
 
-This package installs the main components of Eclipse VOLTTRON (volttron-core, volttron-lib-auth, volttron-lib-zmq).
+This package contains the essential server and client component of Eclipse VOLTTRON framework. In order to start VOLTTRON in addition to this package(volttron-core) you also need volttron-lib-auth and volttron-lib-zmq. 
 
-It is highly recommended you use a virtual environment for installing volttron.
+It is highly recommended you use a virtual environment for installing VOLTTRON.
+
 
 ```shell
 python -m venv <directory name for your virtual env. for example .venv>
@@ -29,7 +30,7 @@ export VOLTTRON_HOME=</path/to/volttron/home>
 pip install volttron
 ```
 
-Note you can also run ```pip install volttron-core volttron-lib-zmq volttron-lib-auth```
+Note: you can also run ```pip install volttron-zmq``` or install the three packages explicitly using ```pip install volttron-core volttron-lib-zmq volttron-lib-auth```
 
 ### Quick Start
 
@@ -94,6 +95,11 @@ Note you can also run ```pip install volttron-core volttron-lib-zmq volttron-lib
     ```bash
     vctl shutdown --platform
     ```
+    
+### Scaled VOLTTRON deployments
+
+Multiple VOLTTRON instances can work together as a federated group and communicate with each other through publish/subscribe method. This is one way to achieve distributed scalable deployments. VOLTTRON also supports automated deployment using ansible. Please refer to 
+[readthedocs](https://eclipse-volttron.readthedocs.io/en/latest/deploying-volttron/scaling-volttron.html) for more details
 
 ## Available Agents
 
