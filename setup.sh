@@ -54,8 +54,8 @@ VOLTTRON_PID=$!
 echo ""
 echo "Waiting for VOLTTRON to be ready..."
 
-# Wait for VOLTTRON to be ready (max 30 seconds)
-MAX_WAIT=30
+# Wait for VOLTTRON to be ready (max 60 seconds)
+MAX_WAIT=60
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
   if vctl status &>/dev/null; then

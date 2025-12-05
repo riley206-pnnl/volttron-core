@@ -45,5 +45,8 @@ rabbitmq-server.download.tar.xz
 pixi.lock
 .volttron_env
 
+# VOLTTRON runtime
+volttron_home/
+
 # Log files
 *.log
