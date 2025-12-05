@@ -8,6 +8,23 @@ echo "VOLTTRON Core Setup"
 echo "=========================================="
 echo ""
 
+# Check for running VOLTTRON processes
+if pgrep -f "volttron -vv" > /dev/null; then
+  echo "[WARNING] VOLTTRON process(es) already running"
+  echo ""
+  read -p "Kill existing VOLTTRON processes? (y/N): " KILL_VOLTTRON
+  if [[ "$KILL_VOLTTRON" =~ ^[Yy]$ ]]; then
+    echo "Killing existing VOLTTRON processes..."
+    pkill -9 -f volttron
+    sleep 2
+    echo "[OK] Processes killed"
+  else
+    echo "Exiting. Please stop existing VOLTTRON processes first."
+    exit 1
+  fi
+  echo ""
+fi
+
 # Check for and install local volttron libraries if available
 echo "Checking for local volttron libraries..."
 
@@ -50,6 +67,7 @@ export VOLTTRON_HOME="$VOLTTRON_HOME"
 volttron -vv -l volttron.log &>/dev/null &
 
 VOLTTRON_PID=$!
+disown
 
 echo ""
 echo "Waiting for VOLTTRON to be ready..."
