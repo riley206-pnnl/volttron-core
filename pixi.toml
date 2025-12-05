@@ -1,0 +1,25 @@
+[workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "win-64"]
+
+[dependencies]
+python = "3.10.*"
+pytest = "*"
+
+[pypi-dependencies]
+volttron-core = { path = ".", editable = true }
+volttron-lib-zmq = "*"
+volttron-lib-auth = "*"
+
+[tasks]
+# Start VOLTTRON platform using setup script
+volttron-start = "bash setup.sh"
+
+# All vctl commands should source the env file first
+vctl = "bash -c 'source \"$PIXI_PROJECT_ROOT/.volttron_env\" 2>/dev/null || true; vctl \"$@\"' bash"
+
+# VOLTTRON command wrapper that sources env file
+volttron = "bash -c 'source \"$PIXI_PROJECT_ROOT/.volttron_env\" 2>/dev/null || true; volttron \"$@\"' bash"
+
+# Test
+test = "pytest tests -v"

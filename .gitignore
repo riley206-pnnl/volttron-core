@@ -39,3 +39,11 @@ rabbitmq-server.download.tar.xz
 /MagicMock/mock/
 /docs/source/volttron_api/
 /dist/
+
+# Pixi
+.pixi/
+pixi.lock
+.volttron_env
+
+# Log files
+*.log
