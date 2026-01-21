@@ -492,10 +492,13 @@ class AIPplatform:
         Installs the agent into the current environment, set up the agent data directory and
         agent data structure.
         """
+        _log.info(f"AIP install_agent STARTED - agent: {agent}, vip_identity: {vip_identity}, force: {force}")
         if agent_config is None:
             agent_config = dict()
 
+        _log.info(f"AIP install_agent - about to call install_agent_or_lib_source")
         name, name_with_version, site_package_dir = self.install_agent_or_lib_source(agent, force, pre_release, editable)
+        _log.info(f"AIP install_agent - install_agent_or_lib_source returned: name={name}, name_with_version={name_with_version}, site_package_dir={site_package_dir}")
         # get default vip_identity if vip_identity is not passed
         # default value will be in "agent_name-default-vip-id" file in site-packages dir
         if vip_identity is None:
