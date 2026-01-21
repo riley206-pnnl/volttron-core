@@ -40,7 +40,7 @@ import psutil
 _log = logging.getLogger(__name__)
 
 
-def execute_command(cmds, env=None, cwd=None, logger=None, err_prefix=None) -> str:
+def execute_command(cmds, env=None, cwd=None, logger=None, err_prefix=None, timeout=300) -> str:
     """Executes a command as a subprocess (Not greenlet safe!)
 
     If the return code of the call is 0 then return stdout otherwise
@@ -52,16 +52,26 @@ def execute_command(cmds, env=None, cwd=None, logger=None, err_prefix=None) -> s
     :param cwd: working directory for the command
     :param logger: a logger to use if errors occur
     :param err_prefix: an error prefix to allow better tracing through the error message
+    :param timeout: timeout in seconds for the subprocess (default: 300)
     :return: stdout string if successful
 
     :raises RuntimeError: if the return code is not 0 from suprocess.run
+    :raises subprocess.TimeoutExpired: if the command exceeds the timeout
     """
 
-    results = subprocess.run(cmds,
-                             env=env,
-                             cwd=cwd,
-                             stderr=subprocess.PIPE,
-                             stdout=subprocess.PIPE)
+    try:
+        results = subprocess.run(cmds,
+                                 env=env,
+                                 cwd=cwd,
+                                 stderr=subprocess.PIPE,
+                                 stdout=subprocess.PIPE,
+                                 timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        err_message = f"Command timed out after {timeout} seconds: {cmds}"
+        if logger:
+            logger.exception(err_message)
+        raise RuntimeError(err_message) from e
+    
     if results.returncode != 0:
         err_prefix = err_prefix if err_prefix is not None else "Error executing command"
         err_message = ("\n{}: Below Command failed with non zero exit code.\n"

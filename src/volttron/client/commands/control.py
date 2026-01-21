@@ -2151,7 +2151,7 @@ def main():
         "--timeout",
         type=float,
         metavar="SECS",
-        timeout=120.0,
+        default=120.0,
         help="timeout in seconds for remote calls (default: %(default)g)",
     )
     

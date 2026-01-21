@@ -165,7 +165,7 @@ def _install_and_initialize_agent(opts: argparse.Namespace,
                                         allow_prerelease=opts.pre_release,
                                         editable=editable)
 
-    agent_uuid = connection.call("install_agent", agent_install.to_dict())
+    agent_uuid = connection.call("install_agent", agent_install.to_dict(), timeout=300)
 
     if not agent_uuid:
         raise ValueError(f"Agent was not installed properly.")

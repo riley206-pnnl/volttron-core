@@ -76,7 +76,10 @@ class ControlConnection(object):
         _log.debug(f"Calling {self.peer} method: {method} with args {args}")
         assert self.server
         assert self.server.vip.rpc
-        return self.server.vip.rpc.call(self.peer, method, *args, **kwargs).get(timeout=20)
+        # Extract timeout from kwargs if provided, otherwise use a sensible default
+        # For install operations, we need much longer than 20 seconds
+        timeout = kwargs.pop('timeout', 300)  # 5 minute default for long operations
+        return self.server.vip.rpc.call(self.peer, method, *args, **kwargs).get(timeout=timeout)
 
     def call_no_get(self, method, *args, **kwargs):
         return self.server.vip.rpc.call(self.peer, method, *args, **kwargs)
