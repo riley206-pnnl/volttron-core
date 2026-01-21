@@ -485,19 +485,25 @@ class ControlService(Agent):
 
     @RPC.export
     def install_agent(self, install_options: AgentInstallOptions | dict) -> str:
-
+        _log.info(f"CONTROL RPC install_agent called with options: {install_options}")
+        
         if isinstance(install_options, dict):
             options = AgentInstallOptions.from_dict(install_options)
         else:
             options = install_options
 
+        _log.info(f"CONTROL RPC install_agent - installing source: {options.source}, identity: {options.identity}")
+
         if not options.source.endswith(".whl"):
-            return self._aip.install_agent(agent=options.source,
+            _log.info(f"CONTROL RPC install_agent - calling AIP.install_agent for {options.source}")
+            result = self._aip.install_agent(agent=options.source,
                                            vip_identity=options.identity,
                                            agent_config=options.agent_config,
                                            force=options.force,
                                            pre_release=options.allow_prerelease,
                                            editable=options.editable)
+            _log.info(f"CONTROL RPC install_agent - completed, result: {result}")
+            return result
 
         wheelhouse = Path("wheelhouse").absolute()
         wheelhouse.mkdir(exist_ok=True)
