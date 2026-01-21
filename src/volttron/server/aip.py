@@ -613,20 +613,28 @@ class AIPplatform:
         Installs a agent or library from wheel or pypi or as editable source
         Returns installed agent/library's name, name-<version>, package directory in which this is installed
         """
+        _log.info(f"AIP install_agent_or_lib_source STARTED - source: {source}, force: {force}, pre_release: {pre_release}, editable: {editable}")
         agent_or_lib_name = None
         site_package_dir = None
         version = None
+        _log.info(f"AIP install_agent_or_lib_source - checking source type")
         if editable and os.path.isdir(source):
+            _log.info(f"AIP install_agent_or_lib_source - editable source directory detected: {source}")
             cmd = ["poetry", "version"]
+            _log.info(f"AIP install_agent_or_lib_source - executing: {' '.join(cmd)} in {source}")
             response = execute_command(cmd, cwd=source)
             if response:
                 # response is of the format <agent-name> <version number>
                 agent_or_lib_name, version = response.split()
                 site_package_dir = source
+                _log.info(f"AIP install_agent_or_lib_source - editable package: {agent_or_lib_name} version {version}")
         elif source.endswith(".whl") and os.path.isfile(source):
+            _log.info(f"AIP install_agent_or_lib_source - wheel file detected: {source}")
             agent_or_lib_name = self._construct_package_name_from_wheel(source)
+            _log.info(f"AIP install_agent_or_lib_source - package name from wheel: {agent_or_lib_name}")
         else:
             # this is a pypi package.
+            _log.info(f"AIP install_agent_or_lib_source - PyPI package detected: {source}")
             # if vctl install got source dir, it would have got built into a whl before getting shipped to server
             # it could be just a package-name(ex. volttron-listener)
             # or package-name with version constraints- ex. volttron-agent@latest, volttron-agent>=1.0.0
@@ -634,11 +642,13 @@ class AIPplatform:
             m = re.match("[\w\-]+", source)
             if m:
                 agent_or_lib_name = m[0]
+                _log.info(f"AIP install_agent_or_lib_source - extracted package name: {agent_or_lib_name}")
 
         if agent_or_lib_name is None:
             # ideally we should never get here! if we get here we haven't handled some specific input format.
             raise RuntimeError(f"Unexpected Error: Unable to get agent or library name based on {source}")
 
+        _log.info(f"AIP install_agent_or_lib_source - building poetry add command")
         cmd_add = ["poetry", "--directory", self._server_opts.poetry_project_path.as_posix()]
         if pre_release:
             cmd_add.append("--allow-prereleases")
@@ -646,19 +656,25 @@ class AIPplatform:
             cmd_add.append("--editable")
         cmd_add.append("add")
         cmd_add.append(source)
+        _log.info(f"AIP install_agent_or_lib_source - poetry command: {' '.join(cmd_add)}")
 
         current_version = None
+        _log.info(f"AIP install_agent_or_lib_source - checking force flag: {force}")
         if force:
             # check if there is even a current version to uninstall
+            _log.info(f"AIP install_agent_or_lib_source - force=True, checking for existing version of {agent_or_lib_name}")
             try:
                 cmd = ["pip", "show", agent_or_lib_name]
                 response = execute_command(cmd)
                 current_version = re.search(".*\nVersion: (.*)", response).groups()[0].strip()
+                _log.info(f"AIP install_agent_or_lib_source - found existing version: {current_version}")
             except RuntimeError as e:
                 # unable to find any existing agent or lib to uninstall so make force = False
+                _log.info(f"AIP install_agent_or_lib_source - no existing version found, setting force=False")
                 force = False
 
         if force and current_version:
+            _log.info(f"AIP install_agent_or_lib_source - performing force reinstall, will remove {agent_or_lib_name}=={current_version}")
             # act on force=True only if there is a current installed version of the agent
             # poetry does not provide --force-reinstall.
             # We essentially have to remove and add. so do a dry run to see nothing will break
@@ -716,8 +732,10 @@ class AIPplatform:
         # finally install agent passed!
         response = None
         try:
+            _log.info(f"AIP install_agent_or_lib_source - EXECUTING POETRY ADD: {' '.join(cmd_add)}")
             _log.debug(f"Executing agent install command : {cmd_add}")
             response = execute_command(cmd_add)
+            _log.info(f"AIP install_agent_or_lib_source - POETRY ADD COMPLETED successfully")
             # if above cmd returned non-zero code it would throw exception.
             # if we are here we succeeded installing some compatible version of the package.
             # Now find agent version installed
@@ -746,10 +764,12 @@ class AIPplatform:
         if not editable:
             # now get the version installed, because poetry add could have been for volttron-agent@latest.
             # we need to find the specific version installed
+            _log.info(f"AIP install_agent_or_lib_source - getting installed version info")
             cmd = ["pip", "show", agent_or_lib_name]
             response = execute_command(cmd)
             version = re.search(".*\nVersion: (.*)", response).groups()[0].strip()
             site_package_dir = re.search(".*\nLocation: (.*)", response).groups()[0].strip()
+            _log.info(f"AIP install_agent_or_lib_source - installed version: {version}, location: {site_package_dir}")
         if site_package_dir is None:
             # we should not get here unless pip changed format of pip show output.
             raise RuntimeError(f"Unable to find installed location of {source} based on pip show command")
@@ -757,6 +777,7 @@ class AIPplatform:
             # we should not get here unless pip changed format of pip show output.
             raise RuntimeError(f"Unable to find installed version of {source} based on pip show command")
 
+        _log.info(f"AIP install_agent_or_lib_source COMPLETED - {agent_or_lib_name}-{version} at {site_package_dir}")
         return agent_or_lib_name, agent_or_lib_name + "-" + version, site_package_dir
 
     @staticmethod
