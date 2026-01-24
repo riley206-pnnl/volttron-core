@@ -259,6 +259,13 @@ class BasicCore(AbstractCore):
         self._async.start(handle_async_)
         current.link(lambda glt: self._async.stop())
 
+        # Register SIGINT handler for graceful shutdown
+        def handle_sigint():
+            _log.debug("SIGINT received, initiating graceful shutdown")
+            stop.set()
+
+        self._sigint_handler = gevent.signal_handler(signal.SIGINT, handle_sigint)
+
         looper = self.loop(running_event)
         next(looper)
         self.onsetup.send(self)
@@ -281,6 +288,10 @@ class BasicCore(AbstractCore):
             stop.wait()
         except (gevent.GreenletExit, KeyboardInterrupt):
             pass
+
+        # Cancel signal handler to clean up resources
+        if hasattr(self, '_sigint_handler'):
+            self._sigint_handler.cancel()
 
         scheduler.kill()
         next(looper)

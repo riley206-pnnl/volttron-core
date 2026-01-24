@@ -112,6 +112,16 @@ def get_default_loggers_config(level: int) -> dict:
         },
         "volttron.client": {
             "level": logging.getLevelName(level_client)
+        },
+        # Agent loggers must always allow INFO level to capture agent output
+        "agents.stdout": {
+            "level": "INFO"
+        },
+        "agents.stderr": {
+            "level": "ERROR"
+        },
+        "agents.log": {
+            "level": "INFO"
         }
     }
 
@@ -267,7 +277,7 @@ def log_to_file(file_, level=logging.WARNING, handler_class=logging.StreamHandle
     Direct log output to a file (or something like one).
     """
     handler = handler_class(file_)
-    handler.setLevel(level)
+    handler.setLevel(logging.DEBUG)  # Handler should accept all levels; filtering done by loggers
     if "VOLTTRON_SERVER" in os.environ:
         format_str = "%(asctime)s %(composite_name)s(%(lineno)d) %(levelname)s: %(message)s"
     else:
@@ -278,6 +288,15 @@ def log_to_file(file_, level=logging.WARNING, handler_class=logging.StreamHandle
         root.setLevel(level)
     root.handlers.clear()
     root.addHandler(handler)
+
+    # Ensure agent loggers always capture output regardless of root level
+    # These loggers capture agent subprocess output and must always be enabled
+    for logger_name, log_level in [("agents.stdout", logging.INFO),
+                                    ("agents.stderr", logging.ERROR),
+                                    ("agents.log", logging.INFO)]:
+        agent_logger = logging.getLogger(logger_name)
+        agent_logger.setLevel(log_level)
+        agent_logger.propagate = True  # Ensure logs reach root handler
 
 
 def configure_logging(conf_path):
