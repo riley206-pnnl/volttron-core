@@ -390,7 +390,16 @@ class ArgumentParser(_argparse.ArgumentParser):
                 cli_args.append(arg_string)
                 continue
             # Some kind of option was encountered, so deal with it
-            action, option_string, explicit_arg = option_tuple
+            # Python 3.12+ returns 4 values: (action, option_string, sep, explicit_arg)
+            # Python 3.11 and earlier returns 3 values: (action, option_string, explicit_arg)
+            if len(option_tuple) == 4:
+                action, option_string, sep, explicit_arg = option_tuple
+                # In Python 3.12, if sep is '=', explicit_arg contains the value
+                # Otherwise explicit_arg is None
+                if sep == '=':
+                    explicit_arg = explicit_arg
+            else:
+                action, option_string, explicit_arg = option_tuple
             if explicit_arg is not None:
                 args = [explicit_arg]
             elif action.nargs in [_argparse.REMAINDER, _argparse.PARSER]:
