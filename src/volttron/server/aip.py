@@ -636,16 +636,26 @@ class AIPplatform:
             agent_or_lib_name = self._construct_package_name_from_wheel(source)
             _log.info(f"AIP install_agent_or_lib_source - package name from wheel: {agent_or_lib_name}")
         else:
-            # this is a pypi package.
-            _log.info(f"AIP install_agent_or_lib_source - PyPI package detected: {source}")
-            # if vctl install got source dir, it would have got built into a whl before getting shipped to server
-            # it could be just a package-name(ex. volttron-listener)
-            # or package-name with version constraints- ex. volttron-agent@latest, volttron-agent>=1.0.0
-            # so match till we hit a character that is NOT alphanumeric character or  _ or -
-            m = re.match("[\w\-]+", source)
-            if m:
-                agent_or_lib_name = m[0]
-                _log.info(f"AIP install_agent_or_lib_source - extracted package name: {agent_or_lib_name}")
+            # Check if this is a git URL (https://github.com/..., git+https://..., etc.)
+            # Git URLs need special handling to extract the package name from the repo name
+            git_url_match = re.match(r'^(?:git\+)?(https?://[^/]+/[^/]+/([^/@]+?)(?:\.git)?(?:@.+)?$)', source)
+            if git_url_match:
+                # This is a git URL - extract package name from repo name
+                repo_name = git_url_match.group(2)
+                agent_or_lib_name = repo_name
+                _log.info(f"AIP install_agent_or_lib_source - Git URL detected: {source}")
+                _log.info(f"AIP install_agent_or_lib_source - extracted package name from repo: {agent_or_lib_name}")
+            else:
+                # this is a pypi package.
+                _log.info(f"AIP install_agent_or_lib_source - PyPI package detected: {source}")
+                # if vctl install got source dir, it would have got built into a whl before getting shipped to server
+                # it could be just a package-name(ex. volttron-listener)
+                # or package-name with version constraints- ex. volttron-agent@latest, volttron-agent>=1.0.0
+                # so match till we hit a character that is NOT alphanumeric character or  _ or -
+                m = re.match(r"[\w\-]+", source)
+                if m:
+                    agent_or_lib_name = m[0]
+                    _log.info(f"AIP install_agent_or_lib_source - extracted package name: {agent_or_lib_name}")
 
         if agent_or_lib_name is None:
             # ideally we should never get here! if we get here we haven't handled some specific input format.
