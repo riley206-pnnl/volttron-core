@@ -49,6 +49,13 @@ from volttron.server.server_options import ServerOptions
 from volttron.types.auth.auth_service import AuthService
 from volttron.types.auth.auth_credentials import CredentialsStore
 
+# Import at module level to avoid circular dependency
+# This will be used to ensure poetry project is initialized
+try:
+    from volttron.server.run_server import setup_poetry_project
+except ImportError:
+    setup_poetry_project = None
+
 # from wheel.tool import unpack
 from volttron.utils import ClientContext as cc, jsonapi
 from volttron.utils import execute_command, get_utc_seconds_from_epoch
@@ -617,6 +624,16 @@ class AIPplatform:
         Returns installed agent/library's name, name-<version>, package directory in which this is installed
         """
         _log.info(f"AIP install_agent_or_lib_source STARTED - source: {source}, force: {force}, pre_release: {pre_release}, editable: {editable}")
+        
+        # Ensure poetry project is initialized before attempting to install
+        pyproject_path = self._server_opts.poetry_project_path / "pyproject.toml"
+        if not pyproject_path.exists():
+            _log.info(f"AIP install_agent_or_lib_source - pyproject.toml not found at {pyproject_path}, initializing poetry project")
+            if setup_poetry_project is not None:
+                setup_poetry_project(self._server_opts.poetry_project_path)
+            else:
+                raise RuntimeError(f"Poetry project not initialized at {self._server_opts.poetry_project_path} and setup_poetry_project is not available. Please start VOLTTRON platform first.")
+        
         agent_or_lib_name = None
         site_package_dir = None
         version = None
@@ -664,6 +681,12 @@ class AIPplatform:
             raise RuntimeError(f"Unexpected Error: Unable to get agent or library name based on {source}")
 
         _log.info(f"AIP install_agent_or_lib_source - building poetry add command")
+        # Create environment with keyring disabled to prevent hanging over SSH
+        poetry_env = os.environ.copy()
+        poetry_env['PYTHON_KEYRING_BACKEND'] = 'keyring.backends.null.Keyring'
+        poetry_env['POETRY_NO_INTERACTION'] = '1'
+        poetry_env['POETRY_VIRTUALENVS_CREATE'] = 'false'
+        
         cmd_add = ["poetry", "--directory", self._server_opts.poetry_project_path.as_posix()]
         if pre_release:
             cmd_add.append("--allow-prereleases")
@@ -700,7 +723,7 @@ class AIPplatform:
                     self._server_opts.poetry_project_path.as_posix(), "remove", agent_or_lib_name, "--dry-run"
                 ]
                 # we only care about the return code. is return code is non-zero below will raise exception
-                execute_command(cmd_dry_run)
+                execute_command(cmd_dry_run, env=poetry_env)
             except RuntimeError as r:
                 raise RuntimeError(f"Attempting to remove current version of agent or library {agent_or_lib_name} "
                                    f"using poetry fails with following error: {r}")
@@ -710,7 +733,7 @@ class AIPplatform:
                 cmd_dry_run.extend(cmd_add)
                 cmd_dry_run.append("--dry-run")
                 # we only care about the return code. is return code is non-zero below will raise exception
-                execute_command(cmd_dry_run)
+                execute_command(cmd_dry_run, env=poetry_env)
             except RuntimeError as r:
                 raise RuntimeError(f"Attempt to install {agent_or_lib_name} using poetry fails "
                                    f"with following error:{r}")
@@ -728,7 +751,7 @@ class AIPplatform:
                     self._server_opts.poetry_project_path.as_posix(), "add", f"{agent_or_lib_name}=={current_version}",
                     "--dry-run"
                 ]
-                execute_command(cmd_dry_run)
+                execute_command(cmd_dry_run, env=poetry_env)
             except RuntimeError as r:
                 raise RuntimeError(f"Unable to find currently installed version of {agent_or_lib_name} "
                                    f"({current_version}) in pypi. Aborting --force install of {source} as we dont have "
@@ -742,15 +765,17 @@ class AIPplatform:
                 "poetry", "--directory",
                 self._server_opts.poetry_project_path.as_posix(), "remove", f"{agent_or_lib_name}"
             ]
-            execute_command(cmd)
+            execute_command(cmd, env=poetry_env)
 
         # finally install agent passed!
         response = None
         try:
-            install_timeout = 900 if is_git_url else 300
-            _log.info(f"AIP install_agent_or_lib_source - EXECUTING POETRY ADD: {' '.join(cmd_add)} (timeout: {install_timeout}s)")
+            # Use 180s (3 min) for git URLs, 120s (2 min) for packages - both should complete in under 1 min normally
+            install_timeout = 180 if is_git_url else 120
+            _log.info(f"AIP install_agent_or_lib_source - EXECUTING POETRY ADD: {' '.join(cmd_add)}")
+            _log.info(f"AIP install_agent_or_lib_source - Timeout set to {install_timeout} seconds. This may take a minute...")
             _log.debug(f"Executing agent install command : {cmd_add}")
-            response = execute_command(cmd_add, timeout=install_timeout)
+            response = execute_command(cmd_add, timeout=install_timeout, env=poetry_env)
             _log.info(f"AIP install_agent_or_lib_source - POETRY ADD COMPLETED successfully")
             # if above cmd returned non-zero code it would throw exception.
             # if we are here we succeeded installing some compatible version of the package.
@@ -766,7 +791,7 @@ class AIPplatform:
                         self._server_opts.poetry_project_path.as_posix(), "add",
                         f"{agent_or_lib_name}=={current_version}"
                     ]
-                    execute_command(cmd)
+                    execute_command(cmd, env=poetry_env)
                 except RuntimeError as e:
                     # We are in trouble. we are not able to install give agent version and unable to roll back to the
                     # version that was already there either!
@@ -972,10 +997,13 @@ class AIPplatform:
             if agent_name not in uuid_name_map.values():
                 # if no other uuid has the same agent name. There was only one instance that we popped earlier
                 # so safe to uninstall source
+                poetry_env = os.environ.copy()
+                poetry_env['PYTHON_KEYRING_BACKEND'] = 'keyring.backends.null.Keyring'
+                poetry_env['POETRY_NO_INTERACTION'] = '1'
                 execute_command([
                     "poetry", "--directory",
                     self._server_opts.poetry_project_path.as_posix(), "remove", agent_name[:agent_name.rfind("-")]
-                ])
+                ], env=poetry_env)
         # update uuid vip id maps
         self._uuid_vip_id_map.pop(agent_uuid)
         self._vip_id_uuid_map.pop(vip_identity)

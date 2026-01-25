@@ -119,10 +119,20 @@ def run_server():
     start_volttron_process(server_options)
 
 
+def _get_poetry_env():
+    """Get environment variables for poetry commands that disable keyring to prevent hanging over SSH."""
+    env = os.environ.copy()
+    env['PYTHON_KEYRING_BACKEND'] = 'keyring.backends.null.Keyring'
+    env['POETRY_NO_INTERACTION'] = '1'
+    env['POETRY_VIRTUALENVS_CREATE'] = 'false'
+    return env
+
 def setup_poetry_project(python_project_path: Path):
     toml = os.path.join(python_project_path, "pyproject.toml")
     if os.path.isfile(toml):
         return
+
+    poetry_env = _get_poetry_env()
 
     if not os.path.isfile(toml):
         cmd = [
@@ -131,13 +141,13 @@ def setup_poetry_project(python_project_path: Path):
             "--python", ">=3.10,<4.0",
             "--author", "volttron <volttron@pnnl.gov>", "--quiet"
         ]
-        execute_command(cmd)
+        execute_command(cmd, env=poetry_env)
         cmd = [
             "poetry", "--directory",
             python_project_path.as_posix(), "source", "add", "--priority=supplemental", "test-pypi",
             "https://test.pypi.org/simple/"
         ]
-        execute_command(cmd)
+        execute_command(cmd, env=poetry_env)
 
     # Now add editable source packages
     # Add these first so that these don't get overwritten by non-editable package's dependency
@@ -155,7 +165,7 @@ def setup_poetry_project(python_project_path: Path):
         if i < 3:
             continue
         poetry_cmd = ["poetry", "add", "--directory", python_project_path.as_posix(), "--editable", line.split()[2]]
-        p = subprocess.Popen(poetry_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(poetry_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=poetry_env)
         stdout, stderr = p.communicate()  # Use p2's output directly
         if p.returncode != 0:
             raise RuntimeError("Unable to add editable package to $VOLTTRON_HOME/pyproject.toml:", stderr.decode())
