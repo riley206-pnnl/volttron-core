@@ -997,12 +997,14 @@ class AIPplatform:
             if agent_name not in uuid_name_map.values():
                 # if no other uuid has the same agent name. There was only one instance that we popped earlier
                 # so safe to uninstall source
+                # NOTE: Do NOT use 'poetry remove' as it removes ALL dependencies including volttron-core!
+                # Instead, just use pip uninstall to remove the specific agent package.
                 poetry_env = os.environ.copy()
                 poetry_env['PYTHON_KEYRING_BACKEND'] = 'keyring.backends.null.Keyring'
                 poetry_env['POETRY_NO_INTERACTION'] = '1'
+                package_name = agent_name[:agent_name.rfind("-")]
                 execute_command([
-                    "poetry", "--directory",
-                    self._server_opts.poetry_project_path.as_posix(), "remove", agent_name[:agent_name.rfind("-")]
+                    "pip", "uninstall", "-y", package_name
                 ], env=poetry_env)
         # update uuid vip id maps
         self._uuid_vip_id_map.pop(agent_uuid)
