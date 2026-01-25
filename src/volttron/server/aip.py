@@ -620,6 +620,7 @@ class AIPplatform:
         agent_or_lib_name = None
         site_package_dir = None
         version = None
+        is_git_url = False
         _log.info(f"AIP install_agent_or_lib_source - checking source type")
         if editable and os.path.isdir(source):
             _log.info(f"AIP install_agent_or_lib_source - editable source directory detected: {source}")
@@ -643,6 +644,7 @@ class AIPplatform:
                 # This is a git URL - extract package name from repo name
                 repo_name = git_url_match.group(2)
                 agent_or_lib_name = repo_name
+                is_git_url = True
                 _log.info(f"AIP install_agent_or_lib_source - Git URL detected: {source}")
                 _log.info(f"AIP install_agent_or_lib_source - extracted package name from repo: {agent_or_lib_name}")
             else:
@@ -745,9 +747,10 @@ class AIPplatform:
         # finally install agent passed!
         response = None
         try:
-            _log.info(f"AIP install_agent_or_lib_source - EXECUTING POETRY ADD: {' '.join(cmd_add)}")
+            install_timeout = 900 if is_git_url else 300
+            _log.info(f"AIP install_agent_or_lib_source - EXECUTING POETRY ADD: {' '.join(cmd_add)} (timeout: {install_timeout}s)")
             _log.debug(f"Executing agent install command : {cmd_add}")
-            response = execute_command(cmd_add)
+            response = execute_command(cmd_add, timeout=install_timeout)
             _log.info(f"AIP install_agent_or_lib_source - POETRY ADD COMPLETED successfully")
             # if above cmd returned non-zero code it would throw exception.
             # if we are here we succeeded installing some compatible version of the package.
