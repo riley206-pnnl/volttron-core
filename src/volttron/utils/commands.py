@@ -30,24 +30,27 @@ __all__ = [
 import logging
 import os
 from pathlib import Path
-import subprocess
 import stat
 import sys
 
 import gevent
+from gevent import subprocess as gsubprocess
 import psutil
 
 _log = logging.getLogger(__name__)
 
 
 def execute_command(cmds, env=None, cwd=None, logger=None, err_prefix=None, timeout=300) -> str:
-    """Executes a command as a subprocess (Not greenlet safe!)
+    """Executes a command as a subprocess (Greenlet safe!)
+
+    Uses gevent.subprocess for cooperative multitasking, allowing other
+    greenlets to run while waiting for the subprocess to complete.
 
     If the return code of the call is 0 then return stdout otherwise
     raise a RuntimeError.  If logger is specified then write the exception
     to the logger otherwise this call will remain silent.
 
-    :param cmds:list of commands to pass to subprocess.run
+    :param cmds: list of commands to pass to subprocess
     :param env: environment to run the command with
     :param cwd: working directory for the command
     :param logger: a logger to use if errors occur
@@ -55,35 +58,51 @@ def execute_command(cmds, env=None, cwd=None, logger=None, err_prefix=None, time
     :param timeout: timeout in seconds for the subprocess (default: 300)
     :return: stdout string if successful
 
-    :raises RuntimeError: if the return code is not 0 from suprocess.run
-    :raises subprocess.TimeoutExpired: if the command exceeds the timeout
+    :raises RuntimeError: if the return code is not 0 from subprocess
+    :raises RuntimeError: if the command exceeds the timeout
     """
 
     try:
-        results = subprocess.run(cmds,
-                                 env=env,
-                                 cwd=cwd,
-                                 stderr=subprocess.PIPE,
-                                 stdout=subprocess.PIPE,
-                                 timeout=timeout)
-    except subprocess.TimeoutExpired as e:
-        err_message = f"Command timed out after {timeout} seconds: {cmds}"
+        # Use gevent.subprocess.Popen for greenlet-safe execution
+        process = gsubprocess.Popen(
+            cmds,
+            env=env,
+            cwd=cwd,
+            stderr=gsubprocess.PIPE,
+            stdout=gsubprocess.PIPE
+        )
+
+        # Use gevent.with_timeout for cooperative timeout handling
+        try:
+            stdout, stderr = gevent.with_timeout(timeout, process.communicate)
+        except gevent.Timeout:
+            process.kill()
+            process.wait()  # Clean up the process
+            err_message = f"Command timed out after {timeout} seconds: {cmds}"
+            if logger:
+                logger.exception(err_message)
+            raise RuntimeError(err_message)
+
+        if process.returncode != 0:
+            err_prefix = err_prefix if err_prefix is not None else "Error executing command"
+            err_message = ("\n{}: Below Command failed with non zero exit code.\n"
+                           "Command:{} \nStdout:\n{}\nStderr:\n{}\n".format(
+                               err_prefix, cmds, stdout, stderr))
+            if logger:
+                logger.exception(err_message)
+                raise RuntimeError()
+            else:
+                raise RuntimeError(err_message)
+
+        return stdout.decode("utf-8") if isinstance(stdout, bytes) else stdout
+
+    except RuntimeError:
+        raise
+    except Exception as e:
+        err_message = f"Error executing command {cmds}: {e}"
         if logger:
             logger.exception(err_message)
         raise RuntimeError(err_message) from e
-    
-    if results.returncode != 0:
-        err_prefix = err_prefix if err_prefix is not None else "Error executing command"
-        err_message = ("\n{}: Below Command failed with non zero exit code.\n"
-                       "Command:{} \nStdout:\n{}\nStderr:\n{}\n".format(
-                           err_prefix, results.args, results.stdout, results.stderr))
-        if logger:
-            logger.exception(err_message)
-            raise RuntimeError()
-        else:
-            raise RuntimeError(err_message)
-
-    return results.stdout.decode("utf-8")
 
 
 def start_agent_thread(cls, **kwargs):

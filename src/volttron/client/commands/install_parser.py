@@ -33,6 +33,7 @@ from pathlib import Path
 import sys
 import tempfile
 from typing import Callable
+from urllib.parse import urlparse
 
 import gevent
 import yaml
@@ -52,6 +53,39 @@ _log = logging.getLogger(__name__)
 
 _stdout = sys.stdout
 _stderr = sys.stderr
+
+
+def _classify_install_source(source: str) -> tuple[str, str]:
+    """Classify the installation source and return (source_type, processed_source).
+
+    Returns one of:
+    - ("url", original_string) - for URLs (git, http, https, file)
+    - ("wheel", path_string) - for .whl files
+    - ("directory", path_string) - for local directories
+    - ("pypi", original_string) - for PyPI package names
+
+    URLs and PyPI names are returned as-is (no Path conversion) to preserve
+    the original string format (e.g., https:// is not corrupted to https:/).
+    Local paths are converted to absolute paths.
+    """
+    # Check for URL patterns first (before any Path conversion)
+    # This prevents Path from corrupting URLs like https://github.com/...
+    parsed = urlparse(source)
+    if parsed.scheme in ('http', 'https', 'git', 'git+https', 'git+ssh', 'file'):
+        return ("url", source)
+
+    # Now safe to check filesystem
+    path = Path(source)
+
+    if path.is_dir():
+        return ("directory", path.resolve().as_posix())
+
+    if path.is_file() and source.endswith('.whl'):
+        return ("wheel", path.resolve().as_posix())
+
+    # Not a URL and not an existing path - treat as PyPI package name
+    # This includes package names with version specifiers like "volttron-listener>=1.0"
+    return ("pypi", source)
 
 
 def _build_from_pyproject(install_path: Path) -> Path:
@@ -300,21 +334,27 @@ def install_lib_vctl(opts: argparse.Namespace, callback=None):
 
     assert opts.connection, "Connection must have been created to access this feature."
 
+    # Get the source as a string first - don't convert to Path yet!
+    # Converting URLs to Path corrupts them (https:// becomes https:/)
     try:
-        install_path = Path(opts.install_path)
+        source = opts.install_path
     except AttributeError:
-        install_path = Path(opts.wheel)
+        source = opts.wheel
 
-    if install_path.is_dir():
-        print(f"Building from {install_path}")
-        install_path = _build_from_pyproject(install_path)
+    source_type, processed_source = _classify_install_source(source)
 
-    if install_path.is_file() and install_path.suffix == ".whl":
-        print(f"Installing from wheel {install_path}")
-        _install_lib(opts, wheel_file=install_path)
+    if source_type == "directory":
+        print(f"Building from {processed_source}")
+        wheel_path = _build_from_pyproject(Path(processed_source))
+        print(f"Installing from wheel {wheel_path}")
+        _install_lib(opts, wheel_file=wheel_path)
+    elif source_type == "wheel":
+        print(f"Installing from wheel {processed_source}")
+        _install_lib(opts, wheel_file=Path(processed_source))
     else:
-        print(f"Installing from pypi {install_path}")
-        _install_lib(opts, pypi_string=install_path.as_posix())
+        # URL or PyPI package - pass string directly, no Path conversion
+        print(f"Installing from {'URL' if source_type == 'url' else 'pypi'}: {processed_source}")
+        _install_lib(opts, pypi_string=processed_source)
 
     if callback:
         callback()
@@ -340,29 +380,33 @@ def install_agent_vctl(opts: argparse.Namespace, callback=None):
 
     assert opts.connection, "Connection must have been created to access this feature."
 
+    # Get the source as a string first - don't convert to Path yet!
+    # Converting URLs to Path corrupts them (https:// becomes https:/)
     try:
-        install_path = Path(opts.install_path)
+        source = opts.install_path
     except AttributeError:
-        install_path = Path(opts.wheel)
+        source = opts.wheel
 
-    editable = False
-    if install_path.is_dir():
+    source_type, processed_source = _classify_install_source(source)
+
+    if source_type == "directory":
         if opts.connection.address.startswith("ipc:"):
-            editable =True
+            # Local connection - can use editable install
+            print(f"Installing editable agent package on local server: {processed_source}")
+            _install_and_initialize_agent(opts)
         else:
-            print(f"Building agent from {install_path}")
-            install_path = _build_from_pyproject(install_path)
-
-    if editable:
-        # No wheel file was built. install editable
-        print(f"Installing editable agent package on local server: {install_path} opts {opts.install_path}")
-        _install_and_initialize_agent(opts)
-    elif install_path.is_file() and install_path.suffix == ".whl":
-        print(f"Installing from wheel {install_path}")
-        _install_and_initialize_agent(opts, wheel_file=install_path)
+            # Remote connection - build wheel first
+            print(f"Building agent from {processed_source}")
+            wheel_path = _build_from_pyproject(Path(processed_source))
+            print(f"Installing from wheel {wheel_path}")
+            _install_and_initialize_agent(opts, wheel_file=wheel_path)
+    elif source_type == "wheel":
+        print(f"Installing from wheel {processed_source}")
+        _install_and_initialize_agent(opts, wheel_file=Path(processed_source))
     else:
-        print(f"Installing from pypi {install_path}")
-        _install_and_initialize_agent(opts, pypi_string=install_path.as_posix())
+        # URL or PyPI package - pass string directly, no Path conversion
+        print(f"Installing from {'URL' if source_type == 'url' else 'pypi'}: {processed_source}")
+        _install_and_initialize_agent(opts, pypi_string=processed_source)
 
     if callback:
         callback()
