@@ -112,40 +112,56 @@ echo ""
 # Save VOLTTRON_HOME to a file for subsequent commands
 echo "export VOLTTRON_HOME=\"$VOLTTRON_HOME\"" > .volttron_env
 
-# Start VOLTTRON
+# Start VOLTTRON with retry logic
 echo "Starting VOLTTRON..."
 export VOLTTRON_HOME="$VOLTTRON_HOME"
-volttron -vv -l volttron.log &>/dev/null &
 
-VOLTTRON_PID=$!
-disown
+MAX_ATTEMPTS=3
+ATTEMPT=1
 
-echo ""
-echo "Waiting for VOLTTRON to be ready..."
-
-# Wait for VOLTTRON to be ready (max 60 seconds)
-MAX_WAIT=60
-COUNTER=0
-while [ $COUNTER -lt $MAX_WAIT ]; do
-  if vctl status &>/dev/null; then
-    echo "[OK] VOLTTRON is ready!"
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+  echo "  Attempt $ATTEMPT of $MAX_ATTEMPTS..."
+  
+  # Start VOLTTRON
+  volttron -vv -l volttron.log &>/dev/null &
+  VOLTTRON_PID=$!
+  disown
+  
+  echo "  Checking if VOLTTRON responds..."
+  
+  # Check vctl status every second for 10 seconds
+  COUNTER=0
+  MAX_WAIT=10
+  while [ $COUNTER -lt $MAX_WAIT ]; do
+    if vctl status &>/dev/null; then
+      echo "[OK] VOLTTRON responded!"
+      STARTED=true
+      break
+    fi
+    sleep 1
+    COUNTER=$((COUNTER + 1))
+    echo -n "."
+  done
+  
+  echo ""
+  
+  if [ "$STARTED" = true ]; then
     break
+  else
+    echo "  [WARNING] No response after 10 seconds, trying again..."
+    ATTEMPT=$((ATTEMPT + 1))
   fi
-  sleep 1
-  COUNTER=$((COUNTER + 1))
-  echo -n "."
 done
 
 echo ""
 
-if [ $COUNTER -eq $MAX_WAIT ]; then
-  echo "[WARNING] VOLTTRON did not respond within ${MAX_WAIT} seconds"
+if [ "$STARTED" != true ]; then
+  echo "[ERROR] VOLTTRON failed to start after $MAX_ATTEMPTS attempts"
   echo "  Check volttron.log for errors"
 else
   echo "[OK] VOLTTRON started successfully"
+  echo "  PID: $VOLTTRON_PID"
 fi
-
-echo "  PID: $VOLTTRON_PID"
 echo "  Log file: volttron.log"
 echo ""
 
