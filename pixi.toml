@@ -15,6 +15,9 @@ volttron-lib-auth = "*"
 # Start VOLTTRON platform using setup script
 volttron-start = "bash setup.sh"
 
+# Start VOLTTRON platform with web service
+volttron-start-web = "bash setup-with-web.sh"
+
 # All vctl commands should source the env file first
 vctl = "bash -c 'source \"$PIXI_PROJECT_ROOT/.volttron_env\" 2>/dev/null || true; vctl \"$@\"' bash"
 
