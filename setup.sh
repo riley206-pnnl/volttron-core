@@ -32,16 +32,16 @@ if [ -d "../volttron-lib-zmq" ]; then
   echo "  [+] Found local volttron-lib-zmq, installing from path..."
   pip install -e ../volttron-lib-zmq
 else
-  echo "  [-] Installing volttron-lib-zmq from PyPI..."
-  pip install volttron-lib-zmq
+  echo "  [-] Installing volttron-lib-zmq from GitHub develop branch..."
+  pip install git+https://github.com/riley206-pnnl/volttron-lib-zmq.git@develop
 fi
 
 if [ -d "../volttron-lib-auth" ]; then
   echo "  [+] Found local volttron-lib-auth, installing from path..."
   pip install -e ../volttron-lib-auth
 else
-  echo "  [-] Installing volttron-lib-auth from PyPI..."
-  pip install volttron-lib-auth
+  echo "  [-] Installing volttron-lib-auth from GitHub develop branch..."
+  pip install git+https://github.com/riley206-pnnl/volttron-lib-auth.git@develop
 fi
 
 echo ""
