@@ -112,73 +112,127 @@ echo ""
 # Save VOLTTRON_HOME to a file for subsequent commands
 echo "export VOLTTRON_HOME=\"$VOLTTRON_HOME\"" > .volttron_env
 
-# Start VOLTTRON with retry logic
+# --- Start VOLTTRON ---
 echo "Starting VOLTTRON..."
 export VOLTTRON_HOME="$VOLTTRON_HOME"
 
-MAX_ATTEMPTS=3
-ATTEMPT=1
+# Remove stale PID file so we can detect when the new instance writes it
+PID_FILE="$VOLTTRON_HOME/VOLTTRON_PID"
+rm -f "$PID_FILE"
 
-while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-  echo "  Attempt $ATTEMPT of $MAX_ATTEMPTS..."
-  
-  # Start VOLTTRON
-  volttron -vv -l volttron.log &>/dev/null &
-  VOLTTRON_PID=$!
-  disown
-  
-  echo "  Checking if VOLTTRON responds..."
-  
-  # Check vctl status every second for 10 seconds
-  COUNTER=0
-  MAX_WAIT=10
-  while [ $COUNTER -lt $MAX_WAIT ]; do
-    if vctl status &>/dev/null; then
-      echo "[OK] VOLTTRON responded!"
-      STARTED=true
-      break
-    fi
-    sleep 1
-    COUNTER=$((COUNTER + 1))
-    echo -n "."
-  done
-  
-  echo ""
-  
-  if [ "$STARTED" = true ]; then
-    break
-  else
-    echo "  [WARNING] No response after 10 seconds, trying again..."
-    ATTEMPT=$((ATTEMPT + 1))
+volttron -vv -l volttron.log &>/dev/null &
+VOLTTRON_PID=$!
+disown
+
+echo ""
+echo "Waiting for VOLTTRON platform to be ready..."
+
+# Wait for platform to write its PID file (signals core services are up).
+# Default 120s; override with VOLTTRON_STARTUP_TIMEOUT env var.
+MAX_WAIT=${VOLTTRON_STARTUP_TIMEOUT:-120}
+COUNTER=0
+PLATFORM_READY=false
+while [ $COUNTER -lt $MAX_WAIT ]; do
+  # Fail fast if the process died
+  if ! kill -0 "$VOLTTRON_PID" 2>/dev/null; then
+    echo ""
+    echo "[ERROR] VOLTTRON process exited unexpectedly"
+    echo ""
+    echo "Last 30 lines of volttron.log:"
+    echo "---"
+    tail -n 30 volttron.log 2>/dev/null || echo "  (log file not found)"
+    echo "---"
+    exit 1
   fi
+
+  # Platform writes VOLTTRON_PID file after auth, message bus, and
+  # config store are all running — that is the readiness signal.
+  if [ -f "$PID_FILE" ]; then
+    echo ""
+    echo "[OK] VOLTTRON platform is ready! (${COUNTER}s)"
+    PLATFORM_READY=true
+    break
+  fi
+
+  sleep 1
+  COUNTER=$((COUNTER + 1))
+  echo -n "."
 done
 
 echo ""
 
-if [ "$STARTED" != true ]; then
-  echo "[ERROR] VOLTTRON failed to start after $MAX_ATTEMPTS attempts"
-  echo "  Check volttron.log for errors"
-else
-  echo "[OK] VOLTTRON started successfully"
-  echo "  PID: $VOLTTRON_PID"
+if [ "$PLATFORM_READY" != true ]; then
+  echo "[WARNING] VOLTTRON did not become ready within ${MAX_WAIT} seconds"
+  echo ""
+  echo "Last 30 lines of volttron.log:"
+  echo "---"
+  tail -n 30 volttron.log 2>/dev/null || echo "  (log file not found)"
+  echo "---"
+  echo ""
+  echo "  The platform process (PID $VOLTTRON_PID) is still running."
+  echo "  It may finish starting — check with: pixi run vctl status"
+  echo ""
+  echo "To stop VOLTTRON:"
+  echo "  pixi run vctl shutdown --platform"
+  exit 1
 fi
-echo "  Log file: volttron.log"
+
+# --- Wait for web service ---
+# Extract port from bind address (e.g. "http://0.0.0.0:8081" -> "8081")
+WEB_PORT="${WEB_BIND_ADDRESS##*:}"
+
+echo "Waiting for web service on port $WEB_PORT..."
+
+WEB_WAIT=${VOLTTRON_WEB_TIMEOUT:-30}
+WEB_COUNTER=0
+WEB_READY=false
+while [ $WEB_COUNTER -lt $WEB_WAIT ]; do
+  # Check if the process is still alive
+  if ! kill -0 "$VOLTTRON_PID" 2>/dev/null; then
+    echo ""
+    echo "[ERROR] VOLTTRON process died while starting web service"
+    echo ""
+    echo "Last 30 lines of volttron.log:"
+    echo "---"
+    tail -n 30 volttron.log 2>/dev/null || echo "  (log file not found)"
+    echo "---"
+    exit 1
+  fi
+
+  # Check if something is listening on the web port
+  if ss -tlnH 2>/dev/null | grep -q ":${WEB_PORT} " || \
+     netstat -tln 2>/dev/null | grep -q ":${WEB_PORT} "; then
+    echo ""
+    echo "[OK] Web service is listening on $WEB_BIND_ADDRESS (${WEB_COUNTER}s)"
+    WEB_READY=true
+    break
+  fi
+
+  sleep 1
+  WEB_COUNTER=$((WEB_COUNTER + 1))
+  echo -n "."
+done
+
 echo ""
 
-# Check if web service is running
-sleep 2
-if ss -tuln 2>/dev/null | grep -q "${WEB_BIND_ADDRESS##*:}" || netstat -tuln 2>/dev/null | grep -q "${WEB_BIND_ADDRESS##*:}"; then
-  echo "[OK] Web service is listening on $WEB_BIND_ADDRESS"
-  echo ""
-  echo "Web Admin Page:"
-  echo "  $WEB_BIND_ADDRESS/admin"
-  echo ""
-else
-  echo "[WARNING] Web service may not be running"
-  echo "  Check volttron.log for errors"
+if [ "$WEB_READY" != true ]; then
+  echo "[WARNING] Web service did not start within ${WEB_WAIT} seconds"
+  echo "  The platform is running but the web service may still be initializing."
+  echo "  Check volttron.log for web-related errors."
   echo ""
 fi
 
+# --- Summary ---
+echo "=========================================="
+echo "  VOLTTRON is running"
+echo "=========================================="
+echo "  PID:          $VOLTTRON_PID"
+echo "  VOLTTRON_HOME: $VOLTTRON_HOME"
+echo "  Log file:     volttron.log"
+if [ "$WEB_READY" = true ]; then
+  echo "  Web Admin:    $WEB_BIND_ADDRESS/admin"
+fi
+echo ""
 echo "To check status:"
 echo "  pixi run vctl status"
 echo ""
