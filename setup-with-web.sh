@@ -139,6 +139,7 @@ echo "export VOLTTRON_HOME=\"$VOLTTRON_HOME\"" > .volttron_env
 # --- Start VOLTTRON ---
 echo "Starting VOLTTRON..."
 export VOLTTRON_HOME="$VOLTTRON_HOME"
+export SKIP_VOLTTRON_POETRY=1
 
 # Remove stale PID file so we can detect when the new instance writes it
 PID_FILE="$VOLTTRON_HOME/VOLTTRON_PID"
