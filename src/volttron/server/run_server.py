@@ -483,6 +483,78 @@ def start_volttron_process(options: ServerOptions):
         # # # ),
         # # ]
 
+        # Load additional services from service_config.yml
+        service_config_path = opts.volttron_home / "service_config.yml"
+        if service_config_path.exists():
+            import inspect
+            import yaml
+            from volttron.types.service_interface import ServiceInterface
+            from volttron.types.server_config import ServerConfig
+            from volttron.utils.dynamic_helper import get_subclasses
+
+            _log.info("Loading services from %s", service_config_path)
+            service_config = yaml.safe_load(service_config_path.read_text()) or {}
+
+            # Build a ServerConfig for services that need it
+            server_config = ServerConfig()
+            server_config.internal_address = opts.service_address or "inproc://vip"
+            server_config.service_config_file = service_config_path
+            server_config.opts = opts
+
+            # Core services already started — skip them
+            core_services = {
+                "volttron.services.config_store",
+                "volttron.services.control",
+                "volttron.services.auth",
+                "volttron.services.health",
+                "volttron.services.federation",
+            }
+
+            for svc_name, svc_conf in service_config.items():
+                if not isinstance(svc_conf, dict):
+                    continue
+                if not svc_conf.get("enabled", False):
+                    _log.debug("Service %s not enabled, skipping", svc_name)
+                    continue
+                if svc_name in core_services:
+                    continue
+
+                try:
+                    module = importlib.import_module(svc_name)
+                    subclasses = get_subclasses(module, ServiceInterface)
+                    if not subclasses:
+                        _log.warning("No ServiceInterface found in %s", svc_name)
+                        continue
+                    cls = subclasses[0]
+
+                    # Build kwargs: identity + address defaults, then overlay
+                    # values from the 'kwargs' section of the service config.
+                    svc_kwargs = {
+                        "identity": svc_name.replace("volttron.services", "platform"),
+                        "address": opts.service_address or "inproc://vip",
+                    }
+                    svc_kwargs.update(svc_conf.get("kwargs", {}))
+
+                    # Inject typed dependencies that the constructor needs
+                    params = inspect.signature(cls.__init__).parameters
+                    if "server_config" in params:
+                        svc_kwargs["server_config"] = server_config
+                    if "aip" in params:
+                        svc_kwargs["aip"] = aip_platform
+                    if "options" in params:
+                        svc_kwargs["options"] = opts
+
+                    _log.info("Starting service: %s (%s)", svc_name, cls.__name__)
+                    instance = cls(**svc_kwargs)
+                    event = gevent.event.Event()
+                    task = gevent.spawn(instance.core.run, event)
+                    event.wait()
+                    del event
+                    spawned_greenlets.append(task)
+                    _log.info("Service started: %s", svc_name)
+                except Exception:
+                    _log.exception("Failed to start service %s", svc_name)
+
         # Auto-start agents now that all services are up
         if opts.autostart:
             for name, error in opts.aip.autostart():
