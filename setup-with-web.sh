@@ -118,7 +118,7 @@ cat > "$VOLTTRON_HOME/config" << EOF
 [volttron]
 instance-name=$VOLTTRON_INSTANCE_NAME
 messagebus=zmq
-vip-address=tcp://127.0.0.1:22916
+address=tcp://127.0.0.1:22916
 EOF
 
 # Create service_config.yml for web service
