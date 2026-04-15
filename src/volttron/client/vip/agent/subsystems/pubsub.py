@@ -117,7 +117,9 @@ class PubSub(SubsystemBase):
                 for peer, bus, prefix, all_platforms, queue in annotations(member, set, "pubsub.subscriptions"):
                     # XXX: needs updated in light of onconnected signal
                     self._add_subscription("prefix", prefix, member, bus, all_platforms)
-                    _log.debug("SYNC ZMQ: all_platforms {}".format(self._my_subscriptions['internal'][bus][prefix]))
+                    platform_key = 'all' if all_platforms else 'internal'
+                    _log.debug("SYNC ZMQ: subscription added to %s platform, bus=%s, prefix=%s",
+                               platform_key, bus, prefix)
 
                 for peer, bus, tag_condition, topic_source, all_platforms, queue in annotations(
                         member, set, "pubsub.subscription_by_tags"):
@@ -164,25 +166,25 @@ class PubSub(SubsystemBase):
         handled = dict()
         for platform in self._my_subscriptions:
             # _log.debug("SYNC: process callback subscriptions: {}".format(self._my_subscriptions[platform][bus]))
-            buses = self._my_subscriptions[platform]
-            for bus in buses:
-                subscriptions = buses[bus]
+            platform_buses = self._my_subscriptions[platform]
+            for sub_bus in platform_buses:
+                subscriptions = platform_buses[sub_bus]
                 for prefix, callbacks in subscriptions.items():
                     if topic.startswith(prefix):
                         handled[prefix] = callbacks
                         for callback in callbacks:
-                            callback(peer, sender, bus, topic, headers, message)
+                            callback(peer, sender, sub_bus, topic, headers, message)
         for platform in self._my_subscriptions_by_tags:
-            buses = self._my_subscriptions_by_tags[platform]
-            for bus in buses:
-                subscriptions = buses[bus]
+            platform_buses = self._my_subscriptions_by_tags[platform]
+            for sub_bus in platform_buses:
+                subscriptions = platform_buses[sub_bus]
                 for prefix, callbacks in subscriptions.items():
                     if topic.startswith(prefix):
                         for callback in callbacks:
                             # don't call same callback function twice for the same topic
                             handled_callbacks = handled.get(prefix, set())
                             if callback not in handled_callbacks:
-                                callback(peer, sender, bus, topic, headers, message)
+                                callback(peer, sender, sub_bus, topic, headers, message)
                                 handled[prefix] = callbacks
 
         if not handled:
@@ -794,12 +796,12 @@ class PubSub(SubsystemBase):
             try:
                 result = self._results.pop(message.id)
             except KeyError:
-                pass
-            _log.debug(f"Result is: {result}")
+                result = None
             response = message.args[1]
 
-            if result:
+            if result is not None:
                 result.set(response)
+                _log.debug(f"Result set for message {message.id}: {result}")
 
         elif op == "publish":
             try:
